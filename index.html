@@ -39,26 +39,42 @@
 <header class="sticky top-0 z-20 bg-ink border-b border-line">
   <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
     <h1 class="font-code text-2xl font-bold tracking-wide">WMS de poche</h1>
-    <div class="flex items-center gap-3">
-      <span id="statut" class="text-sm text-steel flex items-center gap-2"><span id="pastille" class="w-2.5 h-2.5 rounded-full bg-bad"></span><span id="statut-txt">Non connecté</span></span>
-      <button id="btn-config" class="btn btn-alt !py-2 !px-3" aria-label="Configuration">⚙</button>
-    </div>
-  </div>
-  <div id="panneau-config" class="hidden border-t border-line bg-panel">
-    <div class="max-w-3xl mx-auto px-4 py-4 space-y-3">
-      <p class="text-sm text-steel">Ces deux valeurs restent dans le navigateur de cet appareil (LocalStorage). Elles se trouvent dans Supabase : Project Settings → API.</p>
-      <label class="block text-sm">Supabase URL
-        <input id="cfg-url" class="field mt-1" placeholder="https://xxxx.supabase.co" autocapitalize="off" autocomplete="off">
-      </label>
-      <label class="block text-sm">Clé anon (publique)
-        <input id="cfg-key" class="field mt-1" placeholder="eyJhbGciOi..." autocapitalize="off" autocomplete="off">
-      </label>
-      <button id="cfg-save" class="btn btn-main w-full">Enregistrer et se connecter</button>
+    <div id="zone-user" class="hidden">
+      <div class="flex items-center gap-3">
+        <span id="user-mail" class="text-sm text-steel truncate max-w-[9rem]"></span>
+        <button id="btn-logout" class="btn btn-alt !py-2 !px-3 text-sm">Quitter</button>
+      </div>
     </div>
   </div>
 </header>
 
-<main class="max-w-3xl mx-auto px-4 py-5">
+<!-- ===== ÉCRANS DE COMPTE ===== -->
+<section id="ecran-auth" class="hidden max-w-md mx-auto px-4 py-8 space-y-4">
+  <h2 id="auth-titre" class="font-code text-2xl font-bold">Connexion</h2>
+  <form id="auth-form" class="space-y-3">
+    <label class="block text-sm">E-mail<input id="auth-mail" type="email" required class="field mt-1" autocomplete="email"></label>
+    <label class="block text-sm">Mot de passe<input id="auth-mdp" type="password" required minlength="8" class="field mt-1" autocomplete="current-password"></label>
+    <button id="auth-ok" class="btn btn-main w-full">Se connecter</button>
+  </form>
+  <button id="auth-bascule" class="text-safety underline">Créer un compte</button>
+  <button id="auth-oubli" class="block text-steel underline text-sm">Mot de passe oublié</button>
+</section>
+
+<section id="ecran-attente" class="hidden max-w-md mx-auto px-4 py-8 space-y-4">
+  <h2 class="font-code text-2xl font-bold text-safety">Compte en attente</h2>
+  <p>Ton compte n’est pas actif. Un administrateur doit l’activer, puis tu pourras utiliser l’appli.</p>
+  <button id="attente-ok" class="btn btn-alt w-full">Vérifier à nouveau</button>
+</section>
+
+<section id="ecran-mdp" class="hidden max-w-md mx-auto px-4 py-8 space-y-4">
+  <h2 class="font-code text-2xl font-bold">Nouveau mot de passe</h2>
+  <form id="mdp-form" class="space-y-3">
+    <input id="mdp-nouveau" type="password" required minlength="8" class="field" placeholder="8 caractères minimum" autocomplete="new-password">
+    <button class="btn btn-main w-full">Enregistrer</button>
+  </form>
+</section>
+
+<main id="app-main" class="hidden max-w-3xl mx-auto px-4 py-5">
 
   <!-- ===== ONGLET 1 : RANGEMENT ===== -->
   <section id="tab-1" class="space-y-4">
@@ -104,6 +120,13 @@
       <button id="suiv" class="btn btn-alt">Suivant</button>
     </div>
   </section>
+
+  <!-- ===== ONGLET 4 : COMPTES (admin) ===== -->
+  <section id="tab-4" class="hidden space-y-4">
+    <h2 class="font-code text-xl font-bold">Comptes</h2>
+    <p class="text-sm text-steel">Les comptes en attente apparaissent en premier. Un compte désactivé perd l’accès aux données immédiatement.</p>
+    <div id="cpt-corps" class="space-y-3"></div>
+  </section>
 </main>
 
 <!-- Fenêtre de modification -->
@@ -121,11 +144,12 @@
 <div id="toast" class="hidden fixed left-4 right-4 bottom-24 z-30 max-w-md mx-auto rounded-lg px-4 py-3 font-medium text-center"></div>
 
 <!-- Navigation par onglets (en bas : accessible au pouce) -->
-<nav class="fixed bottom-0 inset-x-0 z-20 bg-ink border-t border-line" style="padding-bottom:env(safe-area-inset-bottom)">
-  <div class="max-w-3xl mx-auto grid grid-cols-3">
-    <button class="tab-btn py-3 border-t-4 border-transparent text-steel font-semibold" data-tab="1" aria-selected="true">Rangement</button>
-    <button class="tab-btn py-3 border-t-4 border-transparent text-steel font-semibold" data-tab="2" aria-selected="false">Picking</button>
-    <button class="tab-btn py-3 border-t-4 border-transparent text-steel font-semibold" data-tab="3" aria-selected="false">Inventaire</button>
+<nav id="app-nav" class="hidden fixed bottom-0 inset-x-0 z-20 bg-ink border-t border-line" style="padding-bottom:env(safe-area-inset-bottom)">
+  <div class="max-w-3xl mx-auto flex">
+    <button class="tab-btn flex-1 py-3 border-t-4 border-transparent text-steel font-semibold" data-tab="1" aria-selected="true">Rangement</button>
+    <button class="tab-btn flex-1 py-3 border-t-4 border-transparent text-steel font-semibold" data-tab="2" aria-selected="false">Picking</button>
+    <button class="tab-btn flex-1 py-3 border-t-4 border-transparent text-steel font-semibold" data-tab="3" aria-selected="false">Inventaire</button>
+    <button id="tab-btn-4" class="tab-btn hidden flex-1 py-3 border-t-4 border-transparent text-steel font-semibold" data-tab="4" aria-selected="false">Comptes</button>
   </div>
 </nav>
 
@@ -152,33 +176,119 @@ function toast(msg, ok = true) {
   toast.t = setTimeout(() => t.classList.add('hidden'), 3000);
 }
 
-// ================= CONNEXION SUPABASE =================
-let db = null;
-function connecter() {
-  const url = localStorage.getItem('wms_url'), key = localStorage.getItem('wms_key');
-  db = (url && key) ? supabase.createClient(url, key) : null;
-  $('#pastille').className = 'w-2.5 h-2.5 rounded-full ' + (db ? 'bg-ok' : 'bg-bad');
-  $('#statut-txt').textContent = db ? 'Connecté' : 'Non connecté';
-  return !!db;
+// ================= CONFIGURATION (à renseigner UNE seule fois ici) =================
+// L'URL et la clé anon sont publiques par conception : la sécurité repose sur la connexion + les règles RLS de Supabase.
+// Ne mets JAMAIS la clé « service_role » dans ce fichier.
+const SUPABASE_URL = 'https://VOTRE-PROJET.supabase.co';
+const SUPABASE_ANON_KEY = 'VOTRE_CLE_ANON';
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const exigerDb = () => true;
+const urlApp = location.origin + location.pathname; // adresse de retour des e-mails de réinitialisation
+
+// ================= COMPTES =================
+let profil = null, comptes = [], modeInscription = false;
+let modeRecup = location.hash.includes('type=recovery'); // arrivée depuis un e-mail de réinitialisation
+
+function montrer(ecran) { // 'auth' | 'attente' | 'mdp' | 'app'
+  $('#ecran-auth').classList.toggle('hidden', ecran !== 'auth');
+  $('#ecran-attente').classList.toggle('hidden', ecran !== 'attente');
+  $('#ecran-mdp').classList.toggle('hidden', ecran !== 'mdp');
+  $('#app-main').classList.toggle('hidden', ecran !== 'app');
+  $('#app-nav').classList.toggle('hidden', ecran !== 'app');
+  $('#zone-user').classList.toggle('hidden', ecran === 'auth' || ecran === 'mdp');
 }
-function exigerDb() {
-  if (db) return true;
-  $('#panneau-config').classList.remove('hidden');
-  toast('Renseigne d’abord l’URL et la clé Supabase', false);
-  return false;
+
+// Charge le profil de la session : seul un compte ACTIF accède à l'appli
+async function demarrerSession(session) {
+  if (!session) { profil = null; montrer('auth'); return; }
+  $('#user-mail').textContent = session.user.email;
+  const { data } = await db.from('profils').select('*').eq('id', session.user.id).maybeSingle();
+  profil = data;
+  if (!profil || !profil.actif) { montrer('attente'); return; }
+  $('#tab-btn-4').classList.toggle('hidden', profil.role !== 'admin');
+  montrer('app');
 }
-$('#btn-config').onclick = () => $('#panneau-config').classList.toggle('hidden');
-$('#cfg-save').onclick = () => {
-  localStorage.setItem('wms_url', $('#cfg-url').value.trim());
-  localStorage.setItem('wms_key', $('#cfg-key').value.trim());
-  if (connecter()) { $('#panneau-config').classList.add('hidden'); toast('Configuration enregistrée'); chargerInventaire(); }
+db.auth.onAuthStateChange((event, session) => {
+  if (event === 'PASSWORD_RECOVERY') { modeRecup = true; montrer('mdp'); return; }
+  if (modeRecup || event === 'TOKEN_REFRESHED') return;
+  setTimeout(() => demarrerSession(session), 0); // évite de bloquer le client Supabase dans son propre callback
+});
+
+$('#auth-bascule').onclick = () => {
+  modeInscription = !modeInscription;
+  $('#auth-titre').textContent = modeInscription ? 'Créer un compte' : 'Connexion';
+  $('#auth-ok').textContent = modeInscription ? 'Créer mon compte' : 'Se connecter';
+  $('#auth-bascule').textContent = modeInscription ? 'J’ai déjà un compte' : 'Créer un compte';
+  $('#auth-mdp').autocomplete = modeInscription ? 'new-password' : 'current-password';
+};
+$('#auth-form').onsubmit = async e => {
+  e.preventDefault();
+  const email = $('#auth-mail').value.trim(), password = $('#auth-mdp').value;
+  if (modeInscription) {
+    const { data, error } = await db.auth.signUp({ email, password, options: { emailRedirectTo: urlApp } });
+    if (error) return toast(error.message, false);
+    toast(data.session ? 'Compte créé. Un administrateur doit l’activer.' : 'Compte créé. Confirme ton e-mail, puis connecte-toi.');
+  } else {
+    const { error } = await db.auth.signInWithPassword({ email, password });
+    if (error) toast('E-mail ou mot de passe incorrect', false);
+  }
+};
+$('#auth-oubli').onclick = async () => {
+  const email = $('#auth-mail').value.trim();
+  if (!email) return toast('Saisis ton e-mail d’abord', false);
+  const { error } = await db.auth.resetPasswordForEmail(email, { redirectTo: urlApp });
+  toast(error ? error.message : 'E-mail de réinitialisation envoyé', !error);
+};
+$('#mdp-form').onsubmit = async e => {
+  e.preventDefault();
+  const { error } = await db.auth.updateUser({ password: $('#mdp-nouveau').value });
+  if (error) return toast(error.message, false);
+  toast('Mot de passe modifié');
+  modeRecup = false; history.replaceState(null, '', urlApp);
+  const { data } = await db.auth.getSession();
+  demarrerSession(data.session);
+};
+$('#btn-logout').onclick = () => db.auth.signOut();
+$('#attente-ok').onclick = async () => { const { data } = await db.auth.getSession(); demarrerSession(data.session); };
+
+// ----- Administration des comptes (onglet réservé aux admins) -----
+async function chargerComptes() {
+  const { data, error } = await db.from('profils').select('id,email,role,actif,created_at').order('actif').order('created_at', { ascending: false });
+  if (error) return toast('Erreur : ' + error.message, false);
+  comptes = data;
+  $('#cpt-corps').innerHTML = data.map(c => {
+    const moi = c.id === profil.id;
+    return `<div class="bg-panel border ${c.actif ? 'border-line' : 'border-safety'} rounded-lg p-4 space-y-3">
+      <div class="flex justify-between gap-3"><span class="break-all">${esc(c.email)}${moi ? ' (toi)' : ''}</span>
+        <span class="text-sm font-semibold whitespace-nowrap ${c.actif ? 'text-ok' : 'text-safety'}">${c.actif ? 'Actif' : 'Inactif'}</span></div>
+      <div class="text-sm text-steel">${c.role === 'admin' ? 'Administrateur' : 'Utilisateur'}</div>
+      <div class="flex flex-wrap gap-2">
+        ${moi ? '' : `<button class="chip" data-act="actif" data-id="${c.id}">${c.actif ? 'Désactiver' : 'Activer'}</button>
+        <button class="chip" data-act="role" data-id="${c.id}">${c.role === 'admin' ? 'Retirer admin' : 'Passer admin'}</button>`}
+        <button class="chip" data-act="reset" data-id="${c.id}">Réinitialiser le mot de passe</button>
+      </div></div>`;
+  }).join('');
+}
+$('#cpt-corps').onclick = async e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const c = comptes.find(x => x.id === b.dataset.id);
+  if (b.dataset.act === 'reset') { // envoie à l'utilisateur un e-mail avec un lien pour choisir un nouveau mot de passe
+    if (!confirm(`Envoyer un e-mail de réinitialisation à ${c.email} ?`)) return;
+    const { error } = await db.auth.resetPasswordForEmail(c.email, { redirectTo: urlApp });
+    return toast(error ? error.message : 'E-mail envoyé à ' + c.email, !error);
+  }
+  const maj = b.dataset.act === 'actif' ? { actif: !c.actif } : { role: c.role === 'admin' ? 'user' : 'admin' };
+  const { data, error } = await db.from('profils').update(maj).eq('id', c.id).select();
+  if (error || !data.length) return toast('Modification refusée', false);
+  toast('Compte mis à jour'); chargerComptes();
 };
 
 // ================= ONGLETS =================
 document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => {
   document.querySelectorAll('.tab-btn').forEach(x => x.setAttribute('aria-selected', x === b));
-  [1, 2, 3].forEach(n => $('#tab-' + n).classList.toggle('hidden', String(n) !== b.dataset.tab));
+  [1, 2, 3, 4].forEach(n => $('#tab-' + n).classList.toggle('hidden', String(n) !== b.dataset.tab));
   if (b.dataset.tab === '3') chargerInventaire();
+  if (b.dataset.tab === '4') chargerComptes();
   window.scrollTo(0, 0);
 });
 
@@ -358,9 +468,7 @@ $('#ed-ok').onclick = async () => {
 };
 
 // ================= DÉMARRAGE =================
-$('#cfg-url').value = localStorage.getItem('wms_url') || '';
-$('#cfg-key').value = localStorage.getItem('wms_key') || '';
-if (!connecter()) $('#panneau-config').classList.remove('hidden'); // premier lancement : on ouvre la config
+if (modeRecup) montrer('mdp'); // sinon, onAuthStateChange décide de l'écran à afficher
 // Ferme les suggestions quand on touche ailleurs
 document.addEventListener('click', e => { if (!e.target.closest('#suggest') && e.target.id !== 'titre') $('#suggest').classList.add('hidden'); });
 </script>
