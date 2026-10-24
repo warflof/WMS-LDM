@@ -27,7 +27,7 @@
   .btn-main:active { background:#e0a000; }
   .btn-alt { background:#22384c; color:#e8f0f7; }
   .chip { background:#22384c; border:1px solid #2b4359; border-radius:.4rem; padding:.45rem .75rem; font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1.15rem; letter-spacing:.03em; }
-  .chip:active { background:#ffb703; color:#0f1c28; }
+  .chip:active, .chip.sel { background:#ffb703; color:#0f1c28; border-color:#ffb703; }
   .tab-btn[aria-selected="true"] { color:#ffb703; border-top-color:#ffb703; }
   .done .titre { text-decoration:line-through; opacity:.45; }
   .done { opacity:.7; }
@@ -88,10 +88,14 @@
     </div>
     <div>
       <label for="emp" class="block text-sm mb-1">Code emplacement</label>
-      <input id="emp" class="field font-code text-xl uppercase" list="liste-emp" autocomplete="off" autocapitalize="characters" placeholder="Ex : M2, F4, MEZ-B12">
+      <input id="emp" class="field font-code text-xl uppercase" list="liste-emp" autocomplete="off" autocapitalize="characters" placeholder="Ex : M1-A-2, F4, MEZ-B12">
       <datalist id="liste-emp"></datalist>
       <div id="chips" class="flex flex-wrap gap-2 mt-3"></div>
-      <p class="text-xs text-steel mt-2">M = étagères du milieu (bestsellers) · F = racks du fond · MEZ-B + numéro = mezzanine (petits jeux)</p>
+      <div id="picker" class="hidden mt-3 space-y-2">
+        <div><span class="text-sm text-steel">Rack</span><div id="pk-racks" class="flex flex-wrap gap-2 mt-1"></div></div>
+        <div><span class="text-sm text-steel">Étage</span><div id="pk-etages" class="flex flex-wrap gap-2 mt-1"></div></div>
+      </div>
+      <p class="text-xs text-steel mt-2">M1-A-2 = rangée M1, rack A, étage 2. F1 et F5 se saisissent sans rack ni étage. MEZ-B + numéro = mezzanine.</p>
     </div>
     <button id="btn-save" class="btn btn-main w-full">Enregistrer / Mettre à jour</button>
   </section>
@@ -165,9 +169,28 @@ const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase
 // Échappe % et _ pour les recherches ilike
 const likeEsc = s => s.replace(/[\\%_]/g, '\\$&');
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
-// Emplacements autorisés : M1-M3, F1-F5, MEZ-B + numéro
-const EMP_VALIDE = /^(M[1-3]|F[1-5]|MEZ-B\d+)$/;
-const cleanEmp = s => s.toUpperCase().replace(/\s+/g, '');
+// Structure des rangées : nombre de racks (A, B, C…) et d'étages par rack.
+// F1 et F5 sont des racks particuliers : volontairement absents, ils restent des codes simples.
+// ⚠ Nombre de racks de F2, F3, F4 provisoire (3) : à ajuster ici quand il sera confirmé.
+const STRUCTURE = {
+  M1: { racks: 3, etages: 4 }, M2: { racks: 3, etages: 4 }, M3: { racks: 3, etages: 4 },
+  F2: { racks: 3, etages: 4 }, F3: { racks: 3, etages: 4 }, F4: { racks: 3, etages: 4 }
+};
+// Lit un code saisi (« m1 a 2 », « M1-A-2 », « M1A2 ») et renvoie sa forme normalisée, ou null s'il est invalide.
+// Un code peut rester incomplet (M1 ou M1-A) : les anciens emplacements restent valides.
+function parseEmp(brut) {
+  const e = brut.toUpperCase().trim(); let m;
+  if ((m = e.match(/^MEZ-?B?\s*(\d+)$/))) return 'MEZ-B' + (+m[1]);
+  if (e === 'F1' || e === 'F5') return e;
+  if ((m = e.match(/^([MF]\d)(?:[\s.\-]*([A-Z]))?(?:[\s.\-]*(\d))?$/))) {
+    const conf = STRUCTURE[m[1]], rack = m[2], etage = m[3];
+    if (!conf || (etage && !rack)) return null;
+    if (rack && rack.charCodeAt(0) - 64 > conf.racks) return null;
+    if (etage && (+etage < 1 || +etage > conf.etages)) return null;
+    return m[1] + (rack ? '-' + rack : '') + (etage ? '-' + etage : '');
+  }
+  return null;
+}
 
 function toast(msg, ok = true) {
   const t = $('#toast');
@@ -300,11 +323,35 @@ document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => {
 const SUGGESTIONS = ['M1','M2','M3','F1','F2','F3','F4','F5','MEZ-B'];
 $('#chips').innerHTML = SUGGESTIONS.map(c => `<button type="button" class="chip" data-emp="${c}">${c}</button>`).join('');
 $('#liste-emp').innerHTML = SUGGESTIONS.filter(c => c !== 'MEZ-B').map(c => `<option value="${c}">`).join('');
+// Découpe ce qui est tapé en rangée / rack / étage pour allumer les bons boutons
+function decomposer(brut) {
+  const m = brut.toUpperCase().match(/^([MF]\d)(?:[\s.\-]*([A-Z]))?(?:[\s.\-]*(\d))?/);
+  return m ? { rangee: m[1], rack: m[2] || '', etage: m[3] || '' } : null;
+}
+const composer = (r, rack, et) => r + (rack ? '-' + rack : '') + (rack && et ? '-' + et : '');
+function majPicker() {
+  const d = decomposer($('#emp').value), conf = d && STRUCTURE[d.rangee];
+  $('#picker').classList.toggle('hidden', !conf);
+  if (!conf) return;
+  const btn = (attr, val, actif) => `<button type="button" class="chip ${actif ? 'sel' : ''}" data-${attr}="${val}">${val}</button>`;
+  $('#pk-racks').innerHTML = Array.from({ length: conf.racks }, (_, i) => String.fromCharCode(65 + i)).map(l => btn('rack', l, d.rack === l)).join('');
+  $('#pk-etages').innerHTML = Array.from({ length: conf.etages }, (_, i) => String(i + 1)).map(n => btn('etage', n, d.etage === n)).join('');
+}
 $('#chips').onclick = e => {
   const c = e.target.closest('[data-emp]'); if (!c) return;
   $('#emp').value = c.dataset.emp;
-  $('#emp').focus(); // pour MEZ-B : on tape directement le numéro
+  majPicker();
+  if (c.dataset.emp === 'MEZ-B') $('#emp').focus(); // mezzanine : on tape directement le numéro
 };
+$('#picker').onclick = e => {
+  const b = e.target.closest('[data-rack],[data-etage]'); if (!b) return;
+  const d = decomposer($('#emp').value); if (!d) return;
+  if (b.dataset.rack) $('#emp').value = composer(d.rangee, b.dataset.rack, d.etage);
+  else if (!d.rack) return toast('Choisis d’abord le rack', false);
+  else $('#emp').value = composer(d.rangee, d.rack, b.dataset.etage);
+  majPicker();
+};
+$('#emp').addEventListener('input', majPicker);
 
 // Autocomplétion : propose les jeux déjà en base pendant la frappe
 const chercherSuggestions = debounce(async () => {
@@ -319,7 +366,7 @@ $('#titre').addEventListener('input', () => { $('#indice').classList.add('hidden
 $('#suggest').onclick = e => {
   const li = e.target.closest('li'); if (!li) return;
   $('#titre').value = li.dataset.t;
-  $('#emp').value = li.dataset.e;
+  $('#emp').value = li.dataset.e; majPicker();
   $('#suggest').classList.add('hidden');
   $('#indice').textContent = `Déjà rangé en ${li.dataset.e}. Change le code pour le déplacer.`;
   $('#indice').classList.remove('hidden');
@@ -329,9 +376,9 @@ $('#suggest').onclick = e => {
 $('#btn-save').onclick = async () => {
   if (!exigerDb()) return;
   const titre = $('#titre').value.trim().replace(/\s+/g, ' ');
-  const emp = cleanEmp($('#emp').value);
+  const emp = parseEmp($('#emp').value);
   if (!titre) return toast('Saisis le nom du jeu', false);
-  if (!EMP_VALIDE.test(emp)) return toast('Code invalide. Exemples : M2, F4, MEZ-B12', false);
+  if (!emp) return toast('Code invalide. Exemples : M1-A-2, F4, MEZ-B12', false);
   const maintenant = new Date().toISOString();
   const { data: ex, error: e1 } = await db.from(TABLE).select('id,titre').eq('titre_norm', norm(titre)).limit(1);
   if (e1) return toast('Erreur : ' + e1.message, false);
@@ -345,7 +392,7 @@ $('#btn-save').onclick = async () => {
   }
   if (err) return toast('Erreur : ' + err.message, false);
   toast(`${action} : ${ex.length ? ex[0].titre : titre} → ${emp}`);
-  $('#titre').value = ''; $('#emp').value = ''; $('#indice').classList.add('hidden');
+  $('#titre').value = ''; $('#emp').value = ''; majPicker(); $('#indice').classList.add('hidden');
   $('#titre').focus();
 };
 
@@ -363,13 +410,14 @@ async function chargerTout() {
   return tout;
 }
 
-// Clé de tri géographique : 0 = M (entrée), 1 = F (fond), 2 = MEZ (mezzanine), 3 = autre
+// Clé de tri géographique : [groupe, rangée, rack, étage]
+// groupe 0 = M (entrée), 1 = F (fond), 2 = MEZ (mezzanine), 3 = autre
 function cleTri(emp) {
   const e = (emp || '').toUpperCase(); let m;
-  if ((m = e.match(/^M(\d+)$/))) return [0, +m[1]];
-  if ((m = e.match(/^F(\d+)$/))) return [1, +m[1]];
-  if ((m = e.match(/^MEZ-?B?(\d+)?$/))) return [2, +(m[1] || 0)];
-  return [3, 0];
+  if ((m = e.match(/^([MF])(\d)(?:-([A-Z]))?(?:-(\d))?$/)))
+    return [m[1] === 'M' ? 0 : 1, +m[2], m[3] ? m[3].charCodeAt(0) - 64 : 0, m[4] ? +m[4] : 0];
+  if ((m = e.match(/^MEZ-?B?(\d+)?$/))) return [2, +(m[1] || 0), 0, 0];
+  return [3, 0, 0, 0];
 }
 
 let pick = { trouves: [], introuvables: [], coches: new Set() };
@@ -425,7 +473,7 @@ function rendrePicking() {
   const { trouves, introuvables, coches } = pick;
   trouves.sort((a, b) => {
     const A = cleTri(a.emplacement), B = cleTri(b.emplacement);
-    return A[0] - B[0] || A[1] - B[1] || a.titre.localeCompare(b.titre, 'fr');
+    return A[0] - B[0] || A[1] - B[1] || A[2] - B[2] || A[3] - B[3] || a.titre.localeCompare(b.titre, 'fr');
   });
   let html = `<p id="progres" class="font-code text-xl font-bold text-safety sticky top-[60px] bg-ink py-2 z-10"></p>`, dernier = null;
   trouves.forEach(j => {
@@ -519,9 +567,9 @@ $('#inv-corps').onclick = async e => {
 };
 $('#ed-annuler').onclick = () => $('#dlg').close();
 $('#ed-ok').onclick = async () => {
-  const titre = $('#ed-titre').value.trim().replace(/\s+/g, ' '), emp = cleanEmp($('#ed-emp').value);
+  const titre = $('#ed-titre').value.trim().replace(/\s+/g, ' '), emp = parseEmp($('#ed-emp').value);
   if (!titre) return toast('Le titre est vide', false);
-  if (!EMP_VALIDE.test(emp)) return toast('Code invalide. Exemples : M2, F4, MEZ-B12', false);
+  if (!emp) return toast('Code invalide. Exemples : M1-A-2, F4, MEZ-B12', false);
   const { error } = await db.from(TABLE).update({ titre, emplacement: emp, updated_at: new Date().toISOString() }).eq('id', enCours.id);
   if (error) return toast(error.code === '23505' ? 'Ce titre existe déjà' : 'Erreur : ' + error.message, false);
   $('#dlg').close(); toast('Modifié'); chargerInventaire();
