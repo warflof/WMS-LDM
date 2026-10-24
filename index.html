@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1c28">
+<title>WMS de poche</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+  // Palette « bleu industriel » + jaune de sécurité (couleur des marquages au sol)
+  tailwind.config = { theme: { extend: {
+    colors: { ink:'#0f1c28', panel:'#17293a', line:'#2b4359', steel:'#8fa7bd', safety:'#ffb703', ok:'#3ddc97', bad:'#ff6b6b' },
+    fontFamily: { sans:['Barlow','system-ui','sans-serif'], code:['"Barlow Condensed"','Barlow','sans-serif'] }
+  } } };
+</script>
+<style>
+  body { background:#0f1c28; color:#e8f0f7; padding-top:env(safe-area-inset-top); }
+  .field { width:100%; background:#0f1c28; border:2px solid #2b4359; border-radius:.5rem; padding:.75rem .9rem; font-size:1.05rem; color:#fff; }
+  .field:focus { outline:none; border-color:#ffb703; }
+  .btn { border-radius:.5rem; padding:.8rem 1rem; font-weight:600; font-size:1.05rem; }
+  .btn-main { background:#ffb703; color:#0f1c28; }
+  .btn-main:active { background:#e0a000; }
+  .btn-alt { background:#22384c; color:#e8f0f7; }
+  .chip { background:#22384c; border:1px solid #2b4359; border-radius:.4rem; padding:.45rem .75rem; font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1.15rem; letter-spacing:.03em; }
+  .chip:active { background:#ffb703; color:#0f1c28; }
+  .tab-btn[aria-selected="true"] { color:#ffb703; border-top-color:#ffb703; }
+  .done .titre { text-decoration:line-through; opacity:.45; }
+  .done { opacity:.7; }
+  input[type=checkbox].big { width:1.9rem; height:1.9rem; accent-color:#3ddc97; flex:none; }
+</style>
+</head>
+<body class="font-sans min-h-screen pb-24">
+
+<!-- ===== EN-TÊTE + CONFIGURATION ===== -->
+<header class="sticky top-0 z-20 bg-ink border-b border-line">
+  <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+    <h1 class="font-code text-2xl font-bold tracking-wide">WMS de poche</h1>
+    <div class="flex items-center gap-3">
+      <span id="statut" class="text-sm text-steel flex items-center gap-2"><span id="pastille" class="w-2.5 h-2.5 rounded-full bg-bad"></span><span id="statut-txt">Non connecté</span></span>
+      <button id="btn-config" class="btn btn-alt !py-2 !px-3" aria-label="Configuration">⚙</button>
+    </div>
+  </div>
+  <div id="panneau-config" class="hidden border-t border-line bg-panel">
+    <div class="max-w-3xl mx-auto px-4 py-4 space-y-3">
+      <p class="text-sm text-steel">Ces deux valeurs restent dans le navigateur de cet appareil (LocalStorage). Elles se trouvent dans Supabase : Project Settings → API.</p>
+      <label class="block text-sm">Supabase URL
+        <input id="cfg-url" class="field mt-1" placeholder="https://xxxx.supabase.co" autocapitalize="off" autocomplete="off">
+      </label>
+      <label class="block text-sm">Clé anon (publique)
+        <input id="cfg-key" class="field mt-1" placeholder="eyJhbGciOi..." autocapitalize="off" autocomplete="off">
+      </label>
+      <button id="cfg-save" class="btn btn-main w-full">Enregistrer et se connecter</button>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-3xl mx-auto px-4 py-5">
+
+  <!-- ===== ONGLET 1 : RANGEMENT ===== -->
+  <section id="tab-1" class="space-y-4">
+    <h2 class="font-code text-xl font-bold">Rangement / entrée de stock</h2>
+    <div class="relative">
+      <label for="titre" class="block text-sm mb-1">Nom du jeu de société</label>
+      <input id="titre" class="field" autocomplete="off" placeholder="Ex : Catan">
+      <ul id="suggest" class="hidden absolute left-0 right-0 z-10 mt-1 bg-panel border-2 border-line rounded-lg overflow-hidden"></ul>
+      <p id="indice" class="text-sm text-safety mt-1 hidden"></p>
+    </div>
+    <div>
+      <label for="emp" class="block text-sm mb-1">Code emplacement</label>
+      <input id="emp" class="field font-code text-xl uppercase" list="liste-emp" autocomplete="off" autocapitalize="characters" placeholder="Ex : M2, F4, MEZ-B12">
+      <datalist id="liste-emp"></datalist>
+      <div id="chips" class="flex flex-wrap gap-2 mt-3"></div>
+      <p class="text-xs text-steel mt-2">M = étagères du milieu (bestsellers) · F = racks du fond · MEZ-B + numéro = mezzanine (petits jeux)</p>
+    </div>
+    <button id="btn-save" class="btn btn-main w-full">Enregistrer / Mettre à jour</button>
+  </section>
+
+  <!-- ===== ONGLET 2 : PICKING ===== -->
+  <section id="tab-2" class="hidden space-y-4">
+    <h2 class="font-code text-xl font-bold">Préparation de commande</h2>
+    <textarea id="liste" rows="7" class="field" placeholder="Un titre par ligne&#10;Catan&#10;Dixit&#10;Carcassonne"></textarea>
+    <button id="btn-pick" class="btn btn-main w-full">Générer le parcours de picking</button>
+    <div id="pick-res" class="space-y-2"></div>
+  </section>
+
+  <!-- ===== ONGLET 3 : INVENTAIRE ===== -->
+  <section id="tab-3" class="hidden space-y-4">
+    <h2 class="font-code text-xl font-bold">Recherche & inventaire</h2>
+    <input id="recherche" type="search" class="field" placeholder="Chercher un jeu…" autocomplete="off">
+    <p id="inv-total" class="text-sm text-steel"></p>
+    <div class="border border-line rounded-lg overflow-hidden">
+      <table class="w-full text-left">
+        <thead class="bg-panel text-sm text-steel"><tr><th class="p-3 font-medium">Jeu</th><th class="p-3 font-medium">Place</th><th class="p-3"></th></tr></thead>
+        <tbody id="inv-corps" class="divide-y divide-line"></tbody>
+      </table>
+    </div>
+    <div class="flex items-center justify-between gap-3">
+      <button id="prec" class="btn btn-alt">Précédent</button>
+      <span id="page-info" class="text-sm text-steel"></span>
+      <button id="suiv" class="btn btn-alt">Suivant</button>
+    </div>
+  </section>
+</main>
+
+<!-- Fenêtre de modification -->
+<dialog id="dlg" class="bg-panel text-white rounded-xl p-5 w-[92vw] max-w-md backdrop:bg-black/70">
+  <h3 class="font-code text-xl font-bold mb-3">Modifier la ligne</h3>
+  <label class="block text-sm mb-3">Titre<input id="ed-titre" class="field mt-1"></label>
+  <label class="block text-sm mb-4">Emplacement<input id="ed-emp" class="field mt-1 font-code text-xl uppercase" autocapitalize="characters"></label>
+  <div class="flex gap-3">
+    <button id="ed-annuler" class="btn btn-alt flex-1">Annuler</button>
+    <button id="ed-ok" class="btn btn-main flex-1">Enregistrer</button>
+  </div>
+</dialog>
+
+<!-- Message flottant -->
+<div id="toast" class="hidden fixed left-4 right-4 bottom-24 z-30 max-w-md mx-auto rounded-lg px-4 py-3 font-medium text-center"></div>
+
+<!-- Navigation par onglets (en bas : accessible au pouce) -->
+<nav class="fixed bottom-0 inset-x-0 z-20 bg-ink border-t border-line" style="padding-bottom:env(safe-area-inset-bottom)">
+  <div class="max-w-3xl mx-auto grid grid-cols-3">
+    <button class="tab-btn py-3 border-t-4 border-transparent text-steel font-semibold" data-tab="1" aria-selected="true">Rangement</button>
+    <button class="tab-btn py-3 border-t-4 border-transparent text-steel font-semibold" data-tab="2" aria-selected="false">Picking</button>
+    <button class="tab-btn py-3 border-t-4 border-transparent text-steel font-semibold" data-tab="3" aria-selected="false">Inventaire</button>
+  </div>
+</nav>
+
+<script>
+"use strict";
+// ================= OUTILS =================
+const $ = s => document.querySelector(s);
+const TABLE = 'jeux_stock';
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Normalise un titre pour comparer sans tenir compte de la casse, des accents ni des espaces multiples
+const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+// Échappe % et _ pour les recherches ilike
+const likeEsc = s => s.replace(/[\\%_]/g, '\\$&');
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+// Emplacements autorisés : M1-M3, F1-F5, MEZ-B + numéro
+const EMP_VALIDE = /^(M[1-3]|F[1-5]|MEZ-B\d+)$/;
+const cleanEmp = s => s.toUpperCase().replace(/\s+/g, '');
+
+function toast(msg, ok = true) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = 'fixed left-4 right-4 bottom-24 z-30 max-w-md mx-auto rounded-lg px-4 py-3 font-medium text-center ' + (ok ? 'bg-ok text-ink' : 'bg-bad text-ink');
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => t.classList.add('hidden'), 3000);
+}
+
+// ================= CONNEXION SUPABASE =================
+let db = null;
+function connecter() {
+  const url = localStorage.getItem('wms_url'), key = localStorage.getItem('wms_key');
+  db = (url && key) ? supabase.createClient(url, key) : null;
+  $('#pastille').className = 'w-2.5 h-2.5 rounded-full ' + (db ? 'bg-ok' : 'bg-bad');
+  $('#statut-txt').textContent = db ? 'Connecté' : 'Non connecté';
+  return !!db;
+}
+function exigerDb() {
+  if (db) return true;
+  $('#panneau-config').classList.remove('hidden');
+  toast('Renseigne d’abord l’URL et la clé Supabase', false);
+  return false;
+}
+$('#btn-config').onclick = () => $('#panneau-config').classList.toggle('hidden');
+$('#cfg-save').onclick = () => {
+  localStorage.setItem('wms_url', $('#cfg-url').value.trim());
+  localStorage.setItem('wms_key', $('#cfg-key').value.trim());
+  if (connecter()) { $('#panneau-config').classList.add('hidden'); toast('Configuration enregistrée'); chargerInventaire(); }
+};
+
+// ================= ONGLETS =================
+document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tab-btn').forEach(x => x.setAttribute('aria-selected', x === b));
+  [1, 2, 3].forEach(n => $('#tab-' + n).classList.toggle('hidden', String(n) !== b.dataset.tab));
+  if (b.dataset.tab === '3') chargerInventaire();
+  window.scrollTo(0, 0);
+});
+
+// ================= ONGLET 1 : RANGEMENT =================
+const SUGGESTIONS = ['M1','M2','M3','F1','F2','F3','F4','F5','MEZ-B'];
+$('#chips').innerHTML = SUGGESTIONS.map(c => `<button type="button" class="chip" data-emp="${c}">${c}</button>`).join('');
+$('#liste-emp').innerHTML = SUGGESTIONS.filter(c => c !== 'MEZ-B').map(c => `<option value="${c}">`).join('');
+$('#chips').onclick = e => {
+  const c = e.target.closest('[data-emp]'); if (!c) return;
+  $('#emp').value = c.dataset.emp;
+  $('#emp').focus(); // pour MEZ-B : on tape directement le numéro
+};
+
+// Autocomplétion : propose les jeux déjà en base pendant la frappe
+const chercherSuggestions = debounce(async () => {
+  const v = $('#titre').value.trim(), ul = $('#suggest');
+  if (v.length < 2 || !db) { ul.classList.add('hidden'); return; }
+  const { data } = await db.from(TABLE).select('titre,emplacement').ilike('titre', `%${likeEsc(v)}%`).order('titre').limit(6);
+  if (!data || !data.length) { ul.classList.add('hidden'); return; }
+  ul.innerHTML = data.map(j => `<li class="flex justify-between gap-3 px-4 py-3 border-b border-line last:border-0 active:bg-line" data-t="${esc(j.titre)}" data-e="${esc(j.emplacement)}"><span>${esc(j.titre)}</span><span class="font-code font-bold text-safety">${esc(j.emplacement)}</span></li>`).join('');
+  ul.classList.remove('hidden');
+}, 200);
+$('#titre').addEventListener('input', () => { $('#indice').classList.add('hidden'); chercherSuggestions(); });
+$('#suggest').onclick = e => {
+  const li = e.target.closest('li'); if (!li) return;
+  $('#titre').value = li.dataset.t;
+  $('#emp').value = li.dataset.e;
+  $('#suggest').classList.add('hidden');
+  $('#indice').textContent = `Déjà rangé en ${li.dataset.e}. Change le code pour le déplacer.`;
+  $('#indice').classList.remove('hidden');
+};
+
+// Enregistrer : crée le jeu s'il n'existe pas, sinon met à jour son emplacement
+$('#btn-save').onclick = async () => {
+  if (!exigerDb()) return;
+  const titre = $('#titre').value.trim().replace(/\s+/g, ' ');
+  const emp = cleanEmp($('#emp').value);
+  if (!titre) return toast('Saisis le nom du jeu', false);
+  if (!EMP_VALIDE.test(emp)) return toast('Code invalide. Exemples : M2, F4, MEZ-B12', false);
+  const maintenant = new Date().toISOString();
+  const { data: ex, error: e1 } = await db.from(TABLE).select('id,titre').ilike('titre', likeEsc(titre)).limit(1);
+  if (e1) return toast('Erreur : ' + e1.message, false);
+  let err, action;
+  if (ex.length) {
+    ({ error: err } = await db.from(TABLE).update({ emplacement: emp, updated_at: maintenant }).eq('id', ex[0].id));
+    action = 'Mis à jour';
+  } else {
+    ({ error: err } = await db.from(TABLE).insert({ titre, emplacement: emp, updated_at: maintenant }));
+    action = 'Ajouté';
+  }
+  if (err) return toast('Erreur : ' + err.message, false);
+  toast(`${action} : ${ex.length ? ex[0].titre : titre} → ${emp}`);
+  $('#titre').value = ''; $('#emp').value = ''; $('#indice').classList.add('hidden');
+  $('#titre').focus();
+};
+
+// ================= ONGLET 2 : PICKING =================
+// Charge toute la table par paquets de 1000 (limite de Supabase)
+async function chargerTout() {
+  let tout = [], from = 0;
+  for (;;) {
+    const { data, error } = await db.from(TABLE).select('titre,emplacement').order('id').range(from, from + 999);
+    if (error) throw error;
+    tout = tout.concat(data);
+    if (data.length < 1000) break;
+    from += 1000;
+  }
+  return tout;
+}
+
+// Clé de tri géographique : 0 = M (entrée), 1 = F (fond), 2 = MEZ (mezzanine), 3 = autre
+function cleTri(emp) {
+  const e = (emp || '').toUpperCase(); let m;
+  if ((m = e.match(/^M(\d+)$/))) return [0, +m[1]];
+  if ((m = e.match(/^F(\d+)$/))) return [1, +m[1]];
+  if ((m = e.match(/^MEZ-?B?(\d+)?$/))) return [2, +(m[1] || 0)];
+  return [3, 0];
+}
+
+$('#btn-pick').onclick = async () => {
+  if (!exigerDb()) return;
+  const demandes = [...new Set($('#liste').value.split('\n').map(l => l.trim().replace(/\s+/g, ' ')).filter(Boolean))];
+  if (!demandes.length) return toast('Colle au moins un titre', false);
+  const zone = $('#pick-res');
+  zone.innerHTML = '<p class="text-steel">Recherche en cours…</p>';
+  let base;
+  try { base = await chargerTout(); } catch (e) { zone.innerHTML = ''; return toast('Erreur : ' + e.message, false); }
+  const index = new Map(base.map(j => [norm(j.titre), j]));
+  const trouves = [], introuvables = [];
+  demandes.forEach(d => { const j = index.get(norm(d)); j ? trouves.push(j) : introuvables.push(d); });
+  trouves.sort((a, b) => {
+    const A = cleTri(a.emplacement), B = cleTri(b.emplacement);
+    return A[0] - B[0] || A[1] - B[1] || a.titre.localeCompare(b.titre, 'fr');
+  });
+
+  let html = `<p id="progres" class="font-code text-xl font-bold text-safety sticky top-[60px] bg-ink py-2 z-10"></p>`, dernier = null;
+  trouves.forEach((j, i) => {
+    if (j.emplacement !== dernier) { // un petit séparateur à chaque changement d'emplacement
+      html += `<h3 class="font-code text-2xl font-bold pt-3 text-safety">${esc(j.emplacement)}</h3>`;
+      dernier = j.emplacement;
+    }
+    html += `<label class="ligne flex items-center gap-4 bg-panel border border-line rounded-lg p-4"><input type="checkbox" class="big"><span class="titre text-lg">${esc(j.titre)}</span></label>`;
+  });
+  if (introuvables.length) {
+    html += `<h3 class="font-code text-2xl font-bold pt-5 text-bad">Emplacement inconnu</h3>`;
+    introuvables.forEach(t => html += `<div class="flex items-center justify-between gap-3 border-2 border-bad rounded-lg p-4 text-bad"><span class="text-lg">${esc(t)}</span><span class="text-sm font-semibold">Emplacement inconnu</span></div>`);
+  }
+  zone.innerHTML = html;
+  majProgres();
+};
+function majProgres() {
+  const cases = document.querySelectorAll('#pick-res input[type=checkbox]');
+  const fait = [...cases].filter(c => c.checked).length;
+  const p = $('#progres'); if (p) p.textContent = `${fait} / ${cases.length} ramassés`;
+}
+$('#pick-res').addEventListener('change', e => {
+  if (e.target.type !== 'checkbox') return;
+  e.target.closest('.ligne').classList.toggle('done', e.target.checked);
+  majProgres();
+});
+
+// ================= ONGLET 3 : INVENTAIRE =================
+const PAR_PAGE = 50;
+let page = 0, total = 0, lignes = [];
+async function chargerInventaire() {
+  if (!db) return;
+  const q = $('#recherche').value.trim();
+  let req = db.from(TABLE).select('id,titre,emplacement', { count: 'exact' }).order('titre');
+  if (q) req = req.ilike('titre', `%${likeEsc(q)}%`);
+  const { data, count, error } = await req.range(page * PAR_PAGE, page * PAR_PAGE + PAR_PAGE - 1);
+  if (error) return toast('Erreur : ' + error.message, false);
+  lignes = data; total = count || 0;
+  const pages = Math.max(1, Math.ceil(total / PAR_PAGE));
+  $('#inv-total').textContent = `${total} référence${total > 1 ? 's' : ''}${q ? ' trouvée' + (total > 1 ? 's' : '') : ' en stock'}`;
+  $('#page-info').textContent = `Page ${page + 1} / ${pages}`;
+  $('#prec').disabled = page === 0; $('#suiv').disabled = page + 1 >= pages;
+  $('#prec').classList.toggle('opacity-40', page === 0); $('#suiv').classList.toggle('opacity-40', page + 1 >= pages);
+  $('#inv-corps').innerHTML = data.length ? data.map(j => `
+    <tr>
+      <td class="p-3">${esc(j.titre)}</td>
+      <td class="p-3 font-code text-xl font-bold text-safety whitespace-nowrap">${esc(j.emplacement)}</td>
+      <td class="p-3 whitespace-nowrap text-right">
+        <button class="chip" data-edit="${j.id}" aria-label="Modifier">✎</button>
+        <button class="chip !text-bad" data-del="${j.id}" aria-label="Supprimer">✕</button>
+      </td>
+    </tr>`).join('') : '<tr><td colspan="3" class="p-5 text-center text-steel">Aucun jeu trouvé</td></tr>';
+}
+$('#recherche').addEventListener('input', debounce(() => { page = 0; chargerInventaire(); }, 250));
+$('#prec').onclick = () => { if (page > 0) { page--; chargerInventaire(); window.scrollTo(0, 0); } };
+$('#suiv').onclick = () => { page++; chargerInventaire(); window.scrollTo(0, 0); };
+
+// Modifier / supprimer une ligne
+let enCours = null;
+$('#inv-corps').onclick = async e => {
+  const ed = e.target.closest('[data-edit]'), del = e.target.closest('[data-del]');
+  if (ed) {
+    enCours = lignes.find(l => l.id === ed.dataset.edit);
+    $('#ed-titre').value = enCours.titre; $('#ed-emp').value = enCours.emplacement;
+    $('#dlg').showModal();
+  }
+  if (del) {
+    const l = lignes.find(x => x.id === del.dataset.del);
+    if (!confirm(`Supprimer « ${l.titre} » ?`)) return;
+    const { error } = await db.from(TABLE).delete().eq('id', l.id);
+    if (error) return toast('Erreur : ' + error.message, false);
+    toast('Supprimé'); chargerInventaire();
+  }
+};
+$('#ed-annuler').onclick = () => $('#dlg').close();
+$('#ed-ok').onclick = async () => {
+  const titre = $('#ed-titre').value.trim().replace(/\s+/g, ' '), emp = cleanEmp($('#ed-emp').value);
+  if (!titre) return toast('Le titre est vide', false);
+  if (!EMP_VALIDE.test(emp)) return toast('Code invalide. Exemples : M2, F4, MEZ-B12', false);
+  const { error } = await db.from(TABLE).update({ titre, emplacement: emp, updated_at: new Date().toISOString() }).eq('id', enCours.id);
+  if (error) return toast(error.code === '23505' ? 'Ce titre existe déjà' : 'Erreur : ' + error.message, false);
+  $('#dlg').close(); toast('Modifié'); chargerInventaire();
+};
+
+// ================= DÉMARRAGE =================
+$('#cfg-url').value = localStorage.getItem('wms_url') || '';
+$('#cfg-key').value = localStorage.getItem('wms_key') || '';
+if (!connecter()) $('#panneau-config').classList.remove('hidden'); // premier lancement : on ouvre la config
+// Ferme les suggestions quand on touche ailleurs
+document.addEventListener('click', e => { if (!e.target.closest('#suggest') && e.target.id !== 'titre') $('#suggest').classList.add('hidden'); });
+</script>
+</body>
+</html>
