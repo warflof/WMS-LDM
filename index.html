@@ -10,6 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
 <script>
   // Palette « bleu industriel » + jaune de sécurité (couleur des marquages au sol)
   tailwind.config = { theme: { extend: {
@@ -176,11 +177,14 @@ function toast(msg, ok = true) {
   toast.t = setTimeout(() => t.classList.add('hidden'), 3000);
 }
 
-// ================= CONFIGURATION (à renseigner UNE seule fois ici) =================
-// L'URL et la clé anon sont publiques par conception : la sécurité repose sur la connexion + les règles RLS de Supabase.
-// Ne mets JAMAIS la clé « service_role » dans ce fichier.
-const SUPABASE_URL = 'https://VOTRE-PROJET.supabase.co';
-const SUPABASE_ANON_KEY = 'VOTRE_CLE_ANON';
+// ================= CONFIGURATION =================
+// L'URL et la clé viennent du fichier config.js (à côté de index.html) : on ne les modifie plus ici.
+const CFG = window.WMS_CONFIG || {};
+if (!CFG.url || !CFG.anonKey) {
+  document.body.innerHTML = '<p style="padding:2rem;color:#ff6b6b;font-size:1.1rem">config.js est manquant ou incomplet. Dépose-le dans le même dossier que index.html.</p>';
+  throw new Error('config.js manquant');
+}
+const SUPABASE_URL = CFG.url, SUPABASE_ANON_KEY = CFG.anonKey;
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const exigerDb = () => true;
 const urlApp = location.origin + location.pathname; // adresse de retour des e-mails de réinitialisation
