@@ -160,7 +160,7 @@ const $ = s => document.querySelector(s);
 const TABLE = 'jeux_stock';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // Normalise un titre pour comparer sans tenir compte de la casse, des accents ni des espaces multiples
-const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/œ/g, 'oe').replace(/æ/g, 'ae').replace(/\s+/g, ' ').trim();
 // Échappe % et _ pour les recherches ilike
 const likeEsc = s => s.replace(/[\\%_]/g, '\\$&');
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
@@ -179,8 +179,8 @@ function toast(msg, ok = true) {
 // ================= CONFIGURATION (à renseigner UNE seule fois ici) =================
 // L'URL et la clé anon sont publiques par conception : la sécurité repose sur la connexion + les règles RLS de Supabase.
 // Ne mets JAMAIS la clé « service_role » dans ce fichier.
-const SUPABASE_URL = 'https://ojytmnbgwqwrsuoxvjcq.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_yu6mnkY6bqkRsu5O_Wundg_X2N01Az8';
+const SUPABASE_URL = 'https://VOTRE-PROJET.supabase.co';
+const SUPABASE_ANON_KEY = 'VOTRE_CLE_ANON';
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const exigerDb = () => true;
 const urlApp = location.origin + location.pathname; // adresse de retour des e-mails de réinitialisation
@@ -306,7 +306,7 @@ $('#chips').onclick = e => {
 const chercherSuggestions = debounce(async () => {
   const v = $('#titre').value.trim(), ul = $('#suggest');
   if (v.length < 2 || !db) { ul.classList.add('hidden'); return; }
-  const { data } = await db.from(TABLE).select('titre,emplacement').ilike('titre', `%${likeEsc(v)}%`).order('titre').limit(6);
+  const { data } = await db.from(TABLE).select('titre,emplacement').ilike('titre_norm', `%${likeEsc(norm(v))}%`).order('titre').limit(6);
   if (!data || !data.length) { ul.classList.add('hidden'); return; }
   ul.innerHTML = data.map(j => `<li class="flex justify-between gap-3 px-4 py-3 border-b border-line last:border-0 active:bg-line" data-t="${esc(j.titre)}" data-e="${esc(j.emplacement)}"><span>${esc(j.titre)}</span><span class="font-code font-bold text-safety">${esc(j.emplacement)}</span></li>`).join('');
   ul.classList.remove('hidden');
@@ -329,7 +329,7 @@ $('#btn-save').onclick = async () => {
   if (!titre) return toast('Saisis le nom du jeu', false);
   if (!EMP_VALIDE.test(emp)) return toast('Code invalide. Exemples : M2, F4, MEZ-B12', false);
   const maintenant = new Date().toISOString();
-  const { data: ex, error: e1 } = await db.from(TABLE).select('id,titre').ilike('titre', likeEsc(titre)).limit(1);
+  const { data: ex, error: e1 } = await db.from(TABLE).select('id,titre').eq('titre_norm', norm(titre)).limit(1);
   if (e1) return toast('Erreur : ' + e1.message, false);
   let err, action;
   if (ex.length) {
@@ -368,6 +368,36 @@ function cleTri(emp) {
   return [3, 0];
 }
 
+let pick = { trouves: [], introuvables: [], coches: new Set() };
+
+// Distance de Levenshtein (nombre de fautes de frappe entre deux textes)
+function distance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++)
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+// Propose les 3 jeux les plus proches d'un titre introuvable
+function suggerer(saisi, base, n = 3) {
+  const q = norm(saisi), res = [];
+  for (const j of base) {
+    let sc;
+    if (q.length >= 3 && (j._n.includes(q) || (j._n.length >= 3 && q.includes(j._n)))) sc = 0.85; // titre partiel
+    else {
+      // on compare au titre entier, et au début du titre (faute de frappe sur un titre partiel)
+      const debut = j._n.slice(0, q.length);
+      sc = Math.abs(j._n.length - q.length) > Math.max(3, q.length * 0.4) ? 0 : 1 - distance(q, j._n) / Math.max(q.length, j._n.length);
+      if (j._n.length > q.length && q.length >= 5) sc = Math.max(sc, 0.9 * (1 - distance(q, debut) / q.length));
+    }
+    if (sc >= 0.55) res.push([sc, j]);
+  }
+  return res.sort((a, b) => b[0] - a[0]).slice(0, n).map(x => x[1]);
+}
+
 $('#btn-pick').onclick = async () => {
   if (!exigerDb()) return;
   const demandes = [...new Set($('#liste').value.split('\n').map(l => l.trim().replace(/\s+/g, ' ')).filter(Boolean))];
@@ -376,29 +406,46 @@ $('#btn-pick').onclick = async () => {
   zone.innerHTML = '<p class="text-steel">Recherche en cours…</p>';
   let base;
   try { base = await chargerTout(); } catch (e) { zone.innerHTML = ''; return toast('Erreur : ' + e.message, false); }
-  const index = new Map(base.map(j => [norm(j.titre), j]));
+  base.forEach(j => j._n = norm(j.titre));
+  const index = new Map(base.map(j => [j._n, j]));
   const trouves = [], introuvables = [];
-  demandes.forEach(d => { const j = index.get(norm(d)); j ? trouves.push(j) : introuvables.push(d); });
+  demandes.forEach(d => {
+    const j = index.get(norm(d));
+    j ? trouves.push(j) : introuvables.push({ saisi: d, suggestions: suggerer(d, base) });
+  });
+  pick = { trouves: [...new Set(trouves)], introuvables, coches: new Set() };
+  rendrePicking();
+};
+
+function rendrePicking() {
+  const { trouves, introuvables, coches } = pick;
   trouves.sort((a, b) => {
     const A = cleTri(a.emplacement), B = cleTri(b.emplacement);
     return A[0] - B[0] || A[1] - B[1] || a.titre.localeCompare(b.titre, 'fr');
   });
-
   let html = `<p id="progres" class="font-code text-xl font-bold text-safety sticky top-[60px] bg-ink py-2 z-10"></p>`, dernier = null;
-  trouves.forEach((j, i) => {
-    if (j.emplacement !== dernier) { // un petit séparateur à chaque changement d'emplacement
+  trouves.forEach(j => {
+    if (j.emplacement !== dernier) { // séparateur à chaque changement d'emplacement
       html += `<h3 class="font-code text-2xl font-bold pt-3 text-safety">${esc(j.emplacement)}</h3>`;
       dernier = j.emplacement;
     }
-    html += `<label class="ligne flex items-center gap-4 bg-panel border border-line rounded-lg p-4"><input type="checkbox" class="big"><span class="titre text-lg">${esc(j.titre)}</span></label>`;
+    const fait = coches.has(j.titre);
+    html += `<label class="ligne flex items-center gap-4 bg-panel border border-line rounded-lg p-4 ${fait ? 'done' : ''}"><input type="checkbox" class="big" data-t="${esc(j.titre)}" ${fait ? 'checked' : ''}><span class="titre text-lg">${esc(j.titre)}</span></label>`;
   });
   if (introuvables.length) {
     html += `<h3 class="font-code text-2xl font-bold pt-5 text-bad">Emplacement inconnu</h3>`;
-    introuvables.forEach(t => html += `<div class="flex items-center justify-between gap-3 border-2 border-bad rounded-lg p-4 text-bad"><span class="text-lg">${esc(t)}</span><span class="text-sm font-semibold">Emplacement inconnu</span></div>`);
+    introuvables.forEach((it, i) => {
+      const sug = it.suggestions.length
+        ? `<p class="text-sm text-steel">Vouliez-vous dire :</p>` + it.suggestions.map((j, k) =>
+            `<button type="button" class="chip w-full flex justify-between gap-3 text-left" data-i="${i}" data-k="${k}"><span>${esc(j.titre)}</span><span class="text-safety">${esc(j.emplacement)}</span></button>`).join('')
+        : `<p class="text-sm text-steel">Aucun titre proche trouvé.</p>`;
+      html += `<div class="border-2 border-bad rounded-lg p-4 space-y-2">
+        <div class="flex items-center justify-between gap-3 text-bad"><span class="text-lg">${esc(it.saisi)}</span><span class="text-sm font-semibold whitespace-nowrap">Emplacement inconnu</span></div>${sug}</div>`;
+    });
   }
-  zone.innerHTML = html;
+  $('#pick-res').innerHTML = html;
   majProgres();
-};
+}
 function majProgres() {
   const cases = document.querySelectorAll('#pick-res input[type=checkbox]');
   const fait = [...cases].filter(c => c.checked).length;
@@ -406,8 +453,17 @@ function majProgres() {
 }
 $('#pick-res').addEventListener('change', e => {
   if (e.target.type !== 'checkbox') return;
+  pick.coches[e.target.checked ? 'add' : 'delete'](e.target.dataset.t);
   e.target.closest('.ligne').classList.toggle('done', e.target.checked);
   majProgres();
+});
+// Un clic sur une suggestion remplace le titre introuvable par le bon jeu
+$('#pick-res').addEventListener('click', e => {
+  const b = e.target.closest('[data-k]'); if (!b) return;
+  const i = +b.dataset.i, j = pick.introuvables[i].suggestions[+b.dataset.k];
+  if (!pick.trouves.includes(j)) pick.trouves.push(j);
+  pick.introuvables.splice(i, 1);
+  rendrePicking();
 });
 
 // ================= ONGLET 3 : INVENTAIRE =================
@@ -417,7 +473,7 @@ async function chargerInventaire() {
   if (!db) return;
   const q = $('#recherche').value.trim();
   let req = db.from(TABLE).select('id,titre,emplacement', { count: 'exact' }).order('titre');
-  if (q) req = req.ilike('titre', `%${likeEsc(q)}%`);
+  if (q) req = req.ilike('titre_norm', `%${likeEsc(norm(q))}%`);
   const { data, count, error } = await req.range(page * PAR_PAGE, page * PAR_PAGE + PAR_PAGE - 1);
   if (error) return toast('Erreur : ' + error.message, false);
   lignes = data; total = count || 0;
